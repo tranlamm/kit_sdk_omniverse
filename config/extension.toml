@@ -1,0 +1,49 @@
+[package]
+title = "Usd Stage Inspector Extension"
+version = "0.1.0"
+description = "USD Stage Inspector"
+category = "Inspector"
+changelog = "docs/CHANGELOG.md"
+
+# Icon to show in the Extension Manager
+icon = "data/icon.png"
+
+# Search keywords for the Extension Manager
+keywords = ["kit", "inspector", "usd", "extension"]
+
+# Preview to show in the Extension Manager
+preview_image = "data/preview.png"
+
+# Path (relative to the root) or content of readme markdown file for UI
+readme  = "docs/README.md"
+authors = ["lam.tran"]
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"omni.usd" = {}
+
+[settings]
+
+[core]
+runtime = "python"
+
+# Main python module this extension provides, it will be publicly available as "import buoi_2.usd_stage_inspector_extension"
+[[python.module]]
+name = "buoi_2.usd_stage_inspector_extension"
+
+[ui]
+show_window = true
+
+[documentation]
+pages = [
+    "docs/Overview.md",
+    "docs/CHANGELOG.md",
+]
+
+
+[[test]]
+dependencies = [
+]
+
+args = [
+]
