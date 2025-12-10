@@ -1,6 +1,5 @@
 import omni.ext
-import omni.ui as ui
-from .ui import StageInspectorWindow
+from .ui.StageInspectorWindow import StageInspectorWindow
 
 class UsdStageInspectorExtension(omni.ext.IExt):
     def on_startup(self, _ext_id):
