@@ -5,26 +5,56 @@ from ..model.PrimRow import PrimRow
 from .BaseWindow import BaseWindow
 from .PrimPropertyWindow import PrimPropertyWindow
 import carb.events
+from ..utils.FilterUtils import _match_filter
 
 class StageInspectorWindow(BaseWindow):
     def __init__(self, title="StageInspectorWindow"):
+        print("Init StageInspectorWindow")
         super().__init__(title=title, width=850, height=600, visible=True)
 
         self.__init_variable__()
         self.__add_event__()
+        self.__build_custom_ui__()
 
+        self.reload_all()
+        
+    def __build_custom_ui__(self):
+        self._type_list = ["", "Xform", "Mesh", "Camera", "Light", "Scope", "Material"]
+        self._search_mode = ui.RadioCollection()
+        self._filter_type_model = ui.SimpleIntModel(0)
         with self._window.frame:
             with ui.VStack(style={"padding": 6}, spacing=6):
                 ui.Button("Reload All", clicked_fn=self.reload_all, width=50, height=50)
 
-                with ui.HStack(height=40, spacing=10):
-                    ui.Label("Name:")
-                    self._input_name = ui.StringField(width=150)
-                    ui.Label("Type:")
-                    self._input_type = ui.StringField(width=150)
+                with ui.HStack(spacing=10):
+                    with ui.VStack(spacing=0):
+                        with ui.HStack():
+                            ui.Label("Name:")
+                            self._input_name = ui.StringField(width=150, height = 20)
+                        with ui.HStack():
+                            ui.Label("Type:")
+                            ui.ComboBox(
+                                self._filter_type_model.as_int,
+                                *self._type_list               
+                            )
+                        with ui.HStack():
+                            ui.Label("Path:")
+                            self._input_path = ui.StringField(width=150, height = 20)
+                        with ui.HStack():
+                            ui.Label("Attribute name:")
+                            self._input_attributeName = ui.StringField(width=150, height = 20)
+                        with ui.HStack():
+                            ui.Label("Attribute value:")
+                            self._input_attributeValue = ui.StringField(width=150, height = 20)
 
-                    ui.Button("Apply Filter", clicked_fn=self._on_apply_filter)
-                    ui.Button("Clear Filter", clicked_fn=self.reload_all)
+                    with ui.VStack(spacing=4):
+                        with ui.HStack():
+                            ui.Button("Apply Filter", clicked_fn=self._on_apply_filter, width=40, height = 20)
+                            ui.Button("Clear Filter", clicked_fn=self.reload_all, width=40, height = 20)
+                        with ui.HStack():
+                            ui.RadioButton(text="Normal", radio_collection=self._search_mode)
+                            ui.RadioButton(text="Regex", radio_collection=self._search_mode)
+                            ui.RadioButton(text="Wildcard", radio_collection=self._search_mode)
 
                 with ui.ScrollingFrame(
                     horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
@@ -32,8 +62,7 @@ class StageInspectorWindow(BaseWindow):
                 ):
                     self._content = ui.Frame()
                     self._content.set_build_fn(self.build_content)
-
-        self.reload_all()
+        print("End build UI")
     
     def __init_variable__(self):
         # cache: path → list children PrimRow
@@ -46,6 +75,11 @@ class StageInspectorWindow(BaseWindow):
         self._filter_name = ""
         self._filter_type = ""
         self._cur_selected_path = ""
+        self._filter_path = ""
+        self._filter_attributeName = ""
+        self._filter_attributeValue = ""
+        self.use_regex = False
+        self.use_wildcard = False
 
     def __add_event__(self):
         self._sub = self.__get_context__().get_stage_event_stream().create_subscription_to_pop(
@@ -61,6 +95,11 @@ class StageInspectorWindow(BaseWindow):
         self._filter_name = ""
         self._filter_type = ""
         self._cur_selected_path = ""
+        self._filter_path = ""
+        self._filter_attributeName = ""
+        self._filter_attributeValue = ""
+        self.use_regex = False
+        self.use_wildcard = False
         self.reload_root_prim()
 
     def reload_root_prim(self):
@@ -119,22 +158,48 @@ class StageInspectorWindow(BaseWindow):
         
         with self._content:
             with ui.VStack(style={"min_width": 600}):
-                if self._filter_name or self._filter_type:
+                if self._filter_name or self._filter_type or self._filter_path or (self._filter_attributeName and self._filter_attributeValue):
                     for prim in stage.Traverse():
                         name = prim.GetName()
                         type_name = prim.GetTypeName()
                         path = prim.GetPath().pathString
                         color = 0xFFCCCCCC if prim.IsActive() else 0xFF777777
-
                         # Apply name filter
                         if self._filter_name:
-                            if self._filter_name not in name:
+                            if not _match_filter(name, self._filter_name,
+                                use_regex=self.use_regex,
+                                use_wildcard=self.use_wildcard):
                                 continue
 
                         # Apply type filter
                         if self._filter_type:
-                            if type_name != self._filter_type:
+                            if not _match_filter(type_name, self._filter_type,
+                                use_regex=self.use_regex,
+                                use_wildcard=self.use_wildcard):
                                 continue
+                            
+                        # Apply path filter
+                        if self._filter_path:
+                            if not _match_filter(path, self._filter_path,
+                                use_regex=self.use_regex,
+                                use_wildcard=self.use_wildcard):
+                                continue
+                            
+                        # Attribute name/value filter
+                        if self._filter_attributeName:
+                            attr = prim.GetAttribute(self._filter_attributeName)
+                            if not attr.IsValid():
+                                continue
+
+                            if self._filter_attributeValue:
+                                try:
+                                    val = str(attr.Get())
+                                    if not _match_filter(val, self._filter_attributeValue,
+                                        use_regex=self.use_regex,
+                                        use_wildcard=self.use_wildcard):
+                                        continue
+                                except Exception:
+                                    continue
 
                         # UI row
                         with ui.HStack():
@@ -198,8 +263,14 @@ class StageInspectorWindow(BaseWindow):
         self._content.rebuild()
 
     def _on_apply_filter(self):
+        mode = self._search_mode.model.get_value_as_int()
+        self.use_regex = (mode == 1)
+        self.use_wildcard = (mode == 2)
         self._filter_name = self._input_name.model.get_value_as_string()
-        self._filter_type = self._input_type.model.get_value_as_string()
+        self._filter_type = self._type_list[self._filter_type_model.get_value_as_int()]
+        self._filter_path = self._input_path.model.get_value_as_string()
+        self._filter_attributeName = self._input_attributeName.model.get_value_as_string()
+        self._filter_attributeValue = self._input_attributeValue.model.get_value_as_string()
         self._content.rebuild()
 
     # ----------------------- Window -----------------------
