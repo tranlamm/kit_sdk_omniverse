@@ -7,4 +7,4 @@ class PrimRow:
     type: str
     is_active: bool
     children: list = field(default_factory=list)
-    expanded: bool = False     
+    expanded: bool = False  

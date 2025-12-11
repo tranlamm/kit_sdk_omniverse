@@ -5,12 +5,18 @@ class BaseWindow:
     def __init__(self, title, width, height, visible = True):
         self._window = ui.Window(title=title, width=width, height=height, visible=visible)
     
+    def __get_context__(self):
+        return omni.usd.get_context()
+
     def __get_stage__(self):
         return omni.usd.get_context().get_stage() 
     
     def __select_prim__(self, path):
         ctx = omni.usd.get_context()
         ctx.get_selection().set_selected_prim_paths([path], False)
+
+    def _on_stage_selection_changed(self, selection_paths):
+        pass
     
     def __destroy__(self):
         if self._window:
