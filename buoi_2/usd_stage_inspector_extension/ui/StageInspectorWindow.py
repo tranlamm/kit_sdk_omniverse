@@ -23,42 +23,68 @@ class StageInspectorWindow(BaseWindow):
         self._search_mode = ui.RadioCollection()
         self._filter_type_model = ui.SimpleIntModel(0)
         with self._window.frame:
-            with ui.VStack(style={"padding": 6}, spacing=6):
-                ui.Button("Reload All", clicked_fn=self.reload_all, width=50, height=50)
+            with ui.VStack(style={"padding": 10}, spacing=10):
 
+                # ===================== TOP FILTER BAR =====================
+                with ui.HStack(spacing=12, height=28):
+
+                    # Reload button
+                    ui.Button("Reload", width=60, height=28, clicked_fn=self.reload_all)
+
+                    # Apply / Clear
+                    ui.Button("Apply", width=60, height=28, clicked_fn=self._on_apply_filter)
+                    ui.Button("Clear", width=60, height=28, clicked_fn=self.reload_all)
+
+                    ui.Spacer(width=20)
+
+                    # Radio Buttons (3 modes)
+                    with ui.HStack():
+                        ui.RadioButton(text="Normal", radio_collection=self._search_mode, height=28)
+                        ui.RadioButton(text="Regex", radio_collection=self._search_mode, height=28)
+                        ui.RadioButton(text="Wildcard", radio_collection=self._search_mode, height=28)
+
+                # ===================== NAME + TYPE =====================
                 with ui.HStack(spacing=10):
-                    with ui.VStack(spacing=0):
-                        with ui.HStack():
-                            ui.Label("Name:")
-                            self._input_name = ui.StringField(width=150, height = 20)
-                        with ui.HStack():
-                            ui.Label("Type:")
-                            ui.ComboBox(
-                                self._filter_type_model.as_int,
-                                *self._type_list               
-                            )
-                        with ui.HStack():
-                            ui.Label("Path:")
-                            self._input_path = ui.StringField(width=150, height = 20)
-                        with ui.HStack():
-                            ui.Label("Attribute name:")
-                            self._input_attributeName = ui.StringField(width=150, height = 20)
-                        with ui.HStack():
-                            ui.Label("Attribute value:")
-                            self._input_attributeValue = ui.StringField(width=150, height = 20)
+                    # Name
+                    with ui.HStack(width=180):
+                        ui.Label("Name:", width=60)
+                        self._input_name = ui.StringField(width=120, height=22)
 
-                    with ui.VStack(spacing=4):
-                        with ui.HStack():
-                            ui.Button("Apply Filter", clicked_fn=self._on_apply_filter, width=40, height = 20)
-                            ui.Button("Clear Filter", clicked_fn=self.reload_all, width=40, height = 20)
-                        with ui.HStack():
-                            ui.RadioButton(text="Normal", radio_collection=self._search_mode)
-                            ui.RadioButton(text="Regex", radio_collection=self._search_mode)
-                            ui.RadioButton(text="Wildcard", radio_collection=self._search_mode)
+                    # Type (ComboBox)
+                    with ui.HStack(width=180):
+                        ui.Label("Type:", width=60)
+                        ui.ComboBox(
+                            self._filter_type_model.as_int,
+                            *self._type_list,
+                            width=120,
+                            height=22,
+                        )
 
+                    ui.Spacer()
+
+                # ===================== PATH (FULL WIDTH) =====================
+                with ui.HStack(spacing=10):
+                    ui.Label("Path:", width=60)
+                    self._input_path = ui.StringField(width=600, height=22)
+
+                # ===================== ATTRIBUTE NAME + VALUE =====================
+                with ui.HStack(spacing=10):
+                    # Attribute Name
+                    with ui.HStack(width=300):
+                        ui.Label("Attr Name:", width=80)
+                        self._input_attributeName = ui.StringField(width=240, height=22)
+
+                    # Attribute Value
+                    with ui.HStack(width=300):
+                        ui.Label("Value:", width=60)
+                        self._input_attributeValue = ui.StringField(width=240, height=22)
+
+                    ui.Spacer()
+
+                # ===================== SCROLLING AREA (2/3 HEIGHT) =====================
                 with ui.ScrollingFrame(
                     horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
-                    vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED
+                    vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
                 ):
                     self._content = ui.Frame()
                     self._content.set_build_fn(self.build_content)
