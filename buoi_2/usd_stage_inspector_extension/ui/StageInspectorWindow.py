@@ -6,6 +6,10 @@ from .BaseWindow import BaseWindow
 from .PrimPropertyWindow import PrimPropertyWindow
 import carb.events
 from ..utils.FilterUtils import _match_filter
+import carb.input
+import json
+import os
+from carb.input import KeyboardEventType
 
 class StageInspectorWindow(BaseWindow):
     def __init__(self, title="StageInspectorWindow"):
@@ -53,14 +57,19 @@ class StageInspectorWindow(BaseWindow):
                     # Type (ComboBox)
                     with ui.HStack(width=180):
                         ui.Label("Type:", width=60)
-                        ui.ComboBox(
+                        self.combo_box = ui.ComboBox(
                             self._filter_type_model.as_int,
                             *self._type_list,
                             width=120,
                             height=22,
                         )
-
+                        
                     ui.Spacer()
+                    
+                    with ui.HStack(spacing=8):
+                        ui.Button("Select All", width=60, height=28, clicked_fn=self._select_all)
+                        ui.Button("Clear All", width=60, height=28, clicked_fn=self._clear_all)
+                        ui.Button("Export", width=70, height=28, clicked_fn=self._export_results)
 
                 # ===================== PATH (FULL WIDTH) =====================
                 with ui.HStack(spacing=10):
@@ -83,6 +92,7 @@ class StageInspectorWindow(BaseWindow):
 
                 # ===================== SCROLLING AREA (2/3 HEIGHT) =====================
                 with ui.ScrollingFrame(
+                    height=400,
                     horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
                     vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
                 ):
@@ -96,31 +106,38 @@ class StageInspectorWindow(BaseWindow):
 
         # List root prim
         self._rows = []
+        
+        self._selected_prim_paths = set()
 
         # For filter
+        self._filtered_prim_paths = []
         self._filter_name = ""
         self._filter_type = ""
-        self._cur_selected_path = ""
         self._filter_path = ""
         self._filter_attributeName = ""
         self._filter_attributeValue = ""
         self.use_regex = False
         self.use_wildcard = False
+        
+        # For UI
+        self._is_choose_select_all = False
 
     def __add_event__(self):
         self._sub = self.__get_context__().get_stage_event_stream().create_subscription_to_pop(
             self._on_stage_event, 
             name="MySelectionSubscription"
         )
+        
         print("Selection subscription created.")
     
     # ---------------------- LOAD UI ----------------------
     def reload_all(self):
+        self._filtered_prim_paths.clear()
         self._cache.clear()
         self._rows.clear()
+        self._selected_prim_paths.clear()
         self._filter_name = ""
         self._filter_type = ""
-        self._cur_selected_path = ""
         self._filter_path = ""
         self._filter_attributeName = ""
         self._filter_attributeValue = ""
@@ -182,6 +199,7 @@ class StageInspectorWindow(BaseWindow):
             print("No USD stage loaded")
             return
         
+        self._filtered_prim_paths.clear()
         with self._content:
             with ui.VStack(style={"min_width": 600}):
                 if self._filter_name or self._filter_type or self._filter_path or (self._filter_attributeName and self._filter_attributeValue):
@@ -227,9 +245,18 @@ class StageInspectorWindow(BaseWindow):
                                 except Exception:
                                     continue
 
+                        self._filtered_prim_paths.append({
+                            "path": path,
+                            "type": type_name
+                        })
                         # UI row
                         with ui.HStack():
                             ui.Label(f"{path} - ({name} - {type_name})", style={"color": color}, tooltip=path)
+                            ui.Button(
+                                "Choose", width=60, height=40,
+                                clicked_fn=lambda p=path: self._on_toggle_multiple(p),
+                                style={"background_color": 0xFF7777AA if path in self._selected_prim_paths else 0xFF555555}
+                            )
                             ui.Button(
                                 "Select", width=60, height=40,
                                 clicked_fn=lambda p=path: self.__select_prim__(p),
@@ -240,6 +267,7 @@ class StageInspectorWindow(BaseWindow):
                                 clicked_fn=lambda p=path: self._open_prim_window(p),
                                 style={"background_color": 0xFF7777AA}
                             )
+                        ui.Spacer()
                     return
 
                 rows_to_process = []
@@ -249,8 +277,7 @@ class StageInspectorWindow(BaseWindow):
                 while rows_to_process:
                     row, indent = rows_to_process.pop(0)
                     indent_px = indent * 18
-                    color = 0xFFCCCCCC if row.is_active else 0xFF777777
-                    color = 0xFF0000FF if row.path == self._cur_selected_path else color
+                    color = 0xFF7777AA if row.path in self._selected_prim_paths else 0xFFCCCCCC
 
                     with ui.HStack(height=26, style={"background_color": 0xFF333333, "border_radius": 3, "min_width": 1000}, spacing=4):
                         if indent_px > 0:
@@ -262,6 +289,12 @@ class StageInspectorWindow(BaseWindow):
                         symbol = ">" if row.expanded else "^"
                         ui.Button(symbol, width=22, clicked_fn=lambda r=row: self._toggle_expand(r))
                         ui.Spacer(width=4)
+                        
+                        ui.Button(
+                            "Choose", width=60,
+                            clicked_fn=lambda p=row.path: self._on_toggle_multiple(p),
+                            style={"background_color": 0xFF7777AA if row.path in self._selected_prim_paths else 0xFF555555}
+                        )
 
                         ui.Button(
                             "Select", width=60,
@@ -282,6 +315,28 @@ class StageInspectorWindow(BaseWindow):
                             rows_to_process.insert(0, (child_row, indent + 1))
 
     # ----------------------- UI HELPERS -----------------------
+    def _select_all(self):
+        self._is_choose_select_all = True
+        ctx = self.__get_context__()
+        ctx.get_selection().set_selected_prim_paths([], False)
+
+        if not self._selected_prim_paths:
+            return
+
+        ctx.get_selection().set_selected_prim_paths(list(self._selected_prim_paths), False)
+        
+    def _clear_all(self):
+        self._selected_prim_paths.clear()
+        self.__get_context__().get_selection().set_selected_prim_paths([], False)
+        self._content.rebuild()
+         
+    def _on_toggle_multiple(self, path):
+        if path not in self._selected_prim_paths:
+            self._selected_prim_paths.add(path)
+        else:
+            self._selected_prim_paths.discard(path)
+        self._content.rebuild()
+
     def _toggle_expand(self, row: PrimRow):
         row.expanded = not row.expanded
         if row.expanded:
@@ -293,7 +348,7 @@ class StageInspectorWindow(BaseWindow):
         self.use_regex = (mode == 1)
         self.use_wildcard = (mode == 2)
         self._filter_name = self._input_name.model.get_value_as_string()
-        self._filter_type = self._type_list[self._filter_type_model.get_value_as_int()]
+        self._filter_type = self._type_list[self.combo_box.model.get_item_value_model().get_value_as_int()]
         self._filter_path = self._input_path.model.get_value_as_string()
         self._filter_attributeName = self._input_attributeName.model.get_value_as_string()
         self._filter_attributeValue = self._input_attributeValue.model.get_value_as_string()
@@ -302,11 +357,38 @@ class StageInspectorWindow(BaseWindow):
     # ----------------------- Window -----------------------
     def _open_prim_window(self, path):
         PrimPropertyWindow(path)
+        
+    def _export_results(self):
+        if not self._filtered_prim_paths:
+            print("No prims to export.")
+            return
+
+        file_path = "../outputs/filtered_prims.json"
+        folder = os.path.dirname(file_path)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder, exist_ok=True)
+        
+        if file_path.endswith(".json"):
+            with open(file_path, "w") as f:
+                json.dump(self._filtered_prim_paths, f)
+        else:
+            with open(file_path, "w") as f:
+                for p in self._filtered_prim_paths:
+                    f.write(str(p) + "\n")
+
+        print(f"Exported filter results to {os.path.abspath(file_path)}")
 
     # ----------------------- Event -----------------------
     def _on_stage_event(self, event: carb.events.IEvent):
         if event.type == int(omni.usd.StageEventType.SELECTION_CHANGED):
             self._on_selection_changed()
+    
+    def on_keyboard_event(self, event):
+        if event.input == carb.input.KeyboardInput.ENTER:
+            if event.type == KeyboardEventType.KEY_RELEASE:
+                self._on_apply_filter()
+        
+        return False
 
     def _on_selection_changed(self):
         # 5. Retrieve the current selection
@@ -322,10 +404,14 @@ class StageInspectorWindow(BaseWindow):
         self._scroll_to_prim(selected_path)
 
     def _scroll_to_prim(self, prim_path: str):
+        if self._is_choose_select_all:
+            self._is_choose_select_all = False
+            return
         def expand_to_path(rows):
             for row in rows:
                 if row.path == prim_path:
-                    self._cur_selected_path = prim_path
+                    self._selected_prim_paths.clear()
+                    self._selected_prim_paths.add(row.path)
                     return True
                 
                 if not row.children:
