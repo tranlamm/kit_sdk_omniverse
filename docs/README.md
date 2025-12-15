@@ -1,3 +1,3 @@
-# Usd Stage Inspector Extension [buoi_2.usd_stage_inspector_extension]
+# Omni Gemini Extension [omni.gemini]
 
-This is an "Usd Stage Inspector Extension"
+This is an "Omni Gemini Extension"

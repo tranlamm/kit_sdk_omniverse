@@ -1,15 +1,15 @@
 [package]
-title = "Usd Stage Inspector Extension"
+title = "Gemini Extension"
 version = "0.1.0"
-description = "USD Stage Inspector"
-category = "Inspector"
+description = "AI Interactive Extension"
+category = "Gemini"
 changelog = "docs/CHANGELOG.md"
 
 # Icon to show in the Extension Manager
 icon = "data/icon.png"
 
 # Search keywords for the Extension Manager
-keywords = ["kit", "inspector", "usd", "extension"]
+keywords = ["kit", "gemini", "ai", "extension"]
 
 # Preview to show in the Extension Manager
 preview_image = "data/preview.png"
@@ -27,9 +27,8 @@ authors = ["lam.tran"]
 [core]
 runtime = "python"
 
-# Main python module this extension provides, it will be publicly available as "import buoi_2.usd_stage_inspector_extension"
 [[python.module]]
-name = "buoi_2.usd_stage_inspector_extension"
+name = "omni.gemini"
 
 [ui]
 show_window = true
