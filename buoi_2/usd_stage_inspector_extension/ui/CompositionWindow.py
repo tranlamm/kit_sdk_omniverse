@@ -4,6 +4,8 @@ import omni.usd
 from pxr import UsdGeom, UsdLux, UsdShade, Usd, Sdf
 from .BaseWindow import BaseWindow
 
+USD_ASSET_ROOT = r"C:\omniverse\usd"
+
 class PropertyStackItem(ui.AbstractItem):
     def __init__(self, layer_id, value, is_winner=False):
         super().__init__()
@@ -120,9 +122,37 @@ class CompositionWindow(BaseWindow):
 
         self.analyze_property_stack(self.prim_path, self.attr_name, self.arc_model)
 
+    def collect_all_sublayers(self, layer: Sdf.Layer, result=None):
+        if result is None:
+            result = []
+
+        for sub_path in layer.subLayerPaths:
+            if os.path.isabs(sub_path):
+                full_path = sub_path
+            else:
+                full_path = os.path.join(USD_ASSET_ROOT, sub_path)
+            
+            # In ra để kiểm tra (DEBUG)
+            print(f"DEBUG: Trying to collect layer at: {full_path}")
+
+            sub_layer = Sdf.Layer.FindOrOpen(full_path)
+            if not sub_layer:
+                continue
+
+            if full_path in result:
+                continue 
+
+            result.append(full_path)
+
+            # đệ quy
+            self.collect_all_sublayers(sub_layer, result)
+
+        return result
+
     def analyze_property_stack(self, prim_path: str, attr_name: str, model: PropertyStackModel):
         stage = self.__get_stage__()
         prim = stage.GetPrimAtPath(prim_path)
+        primName = prim.GetName()
 
         if not prim or not prim.IsValid():
             model.set_data([])
@@ -134,7 +164,7 @@ class CompositionWindow(BaseWindow):
             return
 
         root_layer = stage.GetRootLayer()
-        sublayers = set(root_layer.subLayerPaths)
+        sublayers = self.collect_all_sublayers(root_layer)  # dict: id -> layer
 
         items = []
         prop_stack = attr.GetPropertyStack()
@@ -142,34 +172,37 @@ class CompositionWindow(BaseWindow):
         for i, spec in enumerate(prop_stack):
             layer = spec.layer
             layer_id = layer.identifier if layer else "N/A"
+            formatted_layer_id = layer_id.replace("file:/", "").replace("/", "\\")
             path_str = spec.path.pathString
+            class_name = self.extract_class_name_from_spec(spec)
 
             prefix = ""
-            display_name = ""
 
             # ---- VARIANT ----
             variant_set, variant_name = self._extract_variant_info(path_str)
             if variant_set:
-                prefix = "[VARIANT]"
-                display_name = f"{prefix} {variant_set}={variant_name} | {layer_id}"
+                prefix = f"[VARIANT] {variant_set}={variant_name}"
 
-            # ---- ROOT LAYER ----
+            # ---- INHERIT (CLASS) ----
+            elif class_name != primName:
+                prefix = f"[INHERIT] - {class_name}"
+
+            # ---- ROOT ----
             elif layer == root_layer:
                 prefix = "[ROOT]"
-                display_name = f"{prefix} {layer_id}"
 
             # ---- SUBLAYER ----
-            elif layer_id in sublayers:
+            elif formatted_layer_id in sublayers:
                 prefix = "[SUBLAYER]"
-                display_name = f"{prefix} {layer_id}"
 
-            # ---- PAYLOAD / REFERENCE ----
+            # ---- PAYLOAD / REFERENCE (heuristic) ----
             else:
-                if self._layer_is_payload(prim, layer):
+                if prim.HasPayload():
                     prefix = "[PAYLOAD]"
                 else:
                     prefix = "[REFERENCE]"
-                display_name = f"{prefix} {layer_id}"
+
+            display_name = f"{prefix} {layer_id}"
 
             value = spec.default if spec.HasDefaultValue() else None
 
@@ -191,9 +224,16 @@ class CompositionWindow(BaseWindow):
             return inside.split("=", 1)
         return None, None
     
-    def _layer_is_payload(self, prim, layer):
-        for node in prim.GetPrimIndex().rootNode.children:
-            if node.arcType == Usd.PrimCompositionQuery.ArcTypePayload:
-                if node.layerStack and layer in node.layerStack.layers:
-                    return True
-        return False
+    def extract_class_name_from_spec(self, spec):
+        """
+        /CubeClass.primvars:displayColor  -> CubeClass
+        """
+        path_str = spec.path.pathString
+
+        # bỏ dấu / đầu
+        path_str = path_str.lstrip("/")
+
+        # cắt phần property (.primvars:xxx)
+        prim_part = path_str.split(".", 1)[0]
+
+        return prim_part
