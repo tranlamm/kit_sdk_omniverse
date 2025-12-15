@@ -4,12 +4,69 @@ from pxr import Usd
 from ..model.PrimRow import PrimRow
 from .BaseWindow import BaseWindow
 from .PrimPropertyWindow import PrimPropertyWindow
+from .DependencyGraphWindow import DependencyGraphWindow
 import carb.events
 from ..utils.FilterUtils import _match_filter
 import carb.input
 import json
 import os
 from carb.input import KeyboardEventType
+
+def find_all_multi_source_attributes(
+    min_sources: int = 2,
+    stop_after_first: bool = False,
+):
+    """
+    Duyệt toàn bộ stage và tìm các prim.attribute
+    có Property Stack >= min_sources.
+
+    Args:
+        min_sources (int): số source tối thiểu (default = 2)
+        stop_after_first (bool): True → dừng sau kết quả đầu tiên
+
+    Returns:
+        list[dict]: danh sách kết quả
+    """
+    stage = omni.usd.get_context().get_stage()
+    if not stage:
+        print("[USD] No active stage")
+        return []
+
+    results = []
+
+    for prim in stage.Traverse():
+        if not prim.IsValid():
+            continue
+
+        for attr in prim.GetAttributes():
+            if not attr.IsValid():
+                continue
+
+            try:
+                prop_stack = attr.GetPropertyStack()
+            except Exception:
+                continue
+
+            if not prop_stack or len(prop_stack) < min_sources:
+                continue
+
+            print(prop_stack)
+            entry = {
+                "prim_path": str(prim.GetPath()),
+                "attr_name": attr.GetName(),
+                "source_count": len(prop_stack),
+                "layers": [
+                    spec.layer.identifier if spec.layer else "N/A"
+                    for spec in prop_stack
+                ],
+            }
+
+            results.append(entry)
+
+            if stop_after_first:
+                return results
+
+    return results
 
 class StageInspectorWindow(BaseWindow):
     def __init__(self, title="StageInspectorWindow"):
@@ -75,6 +132,7 @@ class StageInspectorWindow(BaseWindow):
                 with ui.HStack(spacing=10):
                     ui.Label("Path:", width=60)
                     self._input_path = ui.StringField(width=600, height=22)
+                    ui.Button("View dependency graph", width=60, height=28, clicked_fn=self.view_dependency_graph)
 
                 # ===================== ATTRIBUTE NAME + VALUE =====================
                 with ui.HStack(spacing=10):
@@ -144,6 +202,12 @@ class StageInspectorWindow(BaseWindow):
         self.use_regex = False
         self.use_wildcard = False
         self.reload_root_prim()
+
+        # Test only
+        # find_all_multi_source_attributes(
+        #     min_sources=2,
+        #     stop_after_first=False,
+        # )
 
     def reload_root_prim(self):
         if not self.__get_stage__():
@@ -377,6 +441,9 @@ class StageInspectorWindow(BaseWindow):
                     f.write(str(p) + "\n")
 
         print(f"Exported filter results to {os.path.abspath(file_path)}")
+    
+    def view_dependency_graph(self):
+        DependencyGraphWindow()
 
     # ----------------------- Event -----------------------
     def _on_stage_event(self, event: carb.events.IEvent):

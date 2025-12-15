@@ -2,6 +2,7 @@ import omni.ui as ui
 import omni.usd
 from pxr import UsdGeom, UsdLux, UsdShade, Usd
 from .BaseWindow import BaseWindow
+from .CompositionWindow import CompositionWindow
 
 class PrimPropertyWindow(BaseWindow):
     def __init__(self, prim_path: str):
@@ -41,6 +42,7 @@ class PrimPropertyWindow(BaseWindow):
                         with ui.HStack(height=22):
                             ui.Label(attr.GetName(), width=180, style={"color": 0xFFCCCCCC})
                             ui.Label(str(val), style={"color": 0xFFAAAAFF})
+                            ui.Button("Analyze Composition", height=25, width=60, clicked_fn=self._on_analyze_clicked(attr.GetName()))
 
                 ui.Separator(height=2)
 
@@ -98,3 +100,8 @@ class PrimPropertyWindow(BaseWindow):
         shader = UsdShade.Material(prim)
         for s in shader.GetSurfaceOutputs():
             ui.Label(f"Surface: {s.GetName()} = {s.Get()}")  
+
+    def _on_analyze_clicked(self, attr_name):
+        def fun():
+            CompositionWindow(self._prim_path, attr_name)
+        return fun

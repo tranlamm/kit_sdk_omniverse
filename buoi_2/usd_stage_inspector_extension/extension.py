@@ -9,5 +9,5 @@ class UsdStageInspectorExtension(omni.ext.IExt):
     def on_shutdown(self):
         print("[buoi_2.usd_stage_inspector_extension] Extension shutdown")
         if self._window:
-            self._window.destroy()
+            self._window.__destroy__()
             self._window = None
