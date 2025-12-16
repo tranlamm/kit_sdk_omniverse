@@ -120,7 +120,7 @@ class CompositionWindow(BaseWindow):
                     }
                 )
 
-        self.analyze_property_stack(self.prim_path, self.attr_name, self.arc_model)
+        self.analyze_property_stack_V2(self.prim_path, self.attr_name, self.arc_model)
 
     def collect_all_sublayers(self, layer: Sdf.Layer, result=None):
         if result is None:
@@ -166,6 +166,111 @@ class CompositionWindow(BaseWindow):
                 # Lưu ý: node.children trả về list các PcpNode con
                 stack.extend(node.children)
         return nodes
+    
+    def analyze_property_stack_V2(self, prim_path: str, attr_name: str, model: PropertyStackModel):
+        stage = self.__get_stage__()
+        prim = stage.GetPrimAtPath(prim_path)
+
+        if not prim or not prim.IsValid():
+            model.set_data([])
+            return
+
+        attr = prim.GetAttribute(attr_name)
+        if not attr or not attr.IsValid():
+            model.set_data([])
+            return
+
+        prim_name = prim.GetName()
+
+        # ------------------------------------------------------------
+        # 1. Query composition arcs
+        # ------------------------------------------------------------
+        query = Usd.PrimCompositionQuery(prim)
+        arcs = query.GetCompositionArcs()
+
+        # ------------------------------------------------------------
+        # 2. Property stack (strong → weak)
+        # ------------------------------------------------------------
+        prop_stack = attr.GetPropertyStack()
+        items = []
+
+        for i, spec in enumerate(prop_stack):
+            layer = spec.layer
+            layer_id = layer.identifier if layer else "N/A"
+            class_name = self.extract_class_name_from_spec(spec)
+
+            prefix = "[UNKNOWN]"
+            found_arc = False
+
+            # --------------------------------------------------------
+            # 3. Map layer -> composition arc (THÔNG QUA TARGET NODE)
+            # --------------------------------------------------------
+            for arc in arcs:
+                node = arc.GetTargetNode()
+                if not node:
+                    continue
+
+                layer_stack = node.layerStack
+                if not layer_stack or layer not in layer_stack.layers:
+                    continue
+
+                arc_type = arc.GetArcType()
+
+                if arc_type == Pcp.ArcTypeRoot and class_name != prim_name:
+                    continue
+
+                # ---------------- ARC TYPE CLASSIFICATION ----------------
+
+                if arc_type == Pcp.ArcTypeRoot:
+                    if layer == stage.GetRootLayer():
+                        prefix = "[ROOT]"
+                    elif layer == stage.GetSessionLayer():
+                        prefix = "[SESSION]"
+                    else:
+                        prefix = "[SUBLAYER]"
+
+                elif arc_type == Pcp.ArcTypeReference:
+                    prefix = "[REFERENCE]"
+
+                elif arc_type == Pcp.ArcTypePayload:
+                    prefix = "[PAYLOAD]"
+
+                elif arc_type == Pcp.ArcTypeInherit or class_name != prim_name:
+                    prefix = f"[INHERIT] - {class_name}"
+
+                elif arc_type == Pcp.ArcTypeVariant:
+                    prefix = "[VARIANT]"
+
+                elif arc_type == Pcp.ArcTypeSpecialize:
+                    prefix = "[SPECIALIZE]"
+
+                else:
+                    prefix = f"[{arc_type}]"
+
+                found_arc = True
+                break
+
+            if not found_arc:
+                prefix = "[OTHER]"
+
+            formatted_layer_id = (
+                layer_id
+                .replace("file:/", "")
+                .replace("/", "\\")
+            )
+
+            display_name = f"{prefix} {formatted_layer_id}"
+            value = spec.default if spec.HasDefaultValue() else None
+
+            items.append(
+                PropertyStackItem(
+                    layer_id=display_name,
+                    value=value,
+                    is_winner=(i == 0),
+                )
+            )
+
+        model.set_data(items)
 
     def analyze_property_stack(self, prim_path: str, attr_name: str, model: PropertyStackModel):
         stage = self.__get_stage__()
