@@ -1,7 +1,7 @@
 import os
 import omni.ui as ui
 import omni.usd
-from pxr import UsdGeom, UsdLux, UsdShade, Usd, Sdf
+from pxr import UsdGeom, UsdLux, UsdShade, Usd, Sdf, Pcp
 from .BaseWindow import BaseWindow
 
 USD_ASSET_ROOT = r"C:\omniverse\usd"
@@ -149,11 +149,28 @@ class CompositionWindow(BaseWindow):
 
         return result
 
+    # --- Helper function để duyệt cây Pcp ---
+    def _gather_nodes(self, prim_index):
+        """
+        Duyệt đệ quy (DFS) để lấy tất cả PcpNodes từ PrimIndex
+        thay vì dùng GetNodeRange() (không tồn tại trong USD mới).
+        """
+        nodes = []
+        # Bắt đầu từ Root Node
+        if prim_index.IsValid():
+            stack = [prim_index.rootNode]
+            while stack:
+                node = stack.pop()
+                nodes.append(node)
+                # Thêm các node con vào stack để duyệt tiếp
+                # Lưu ý: node.children trả về list các PcpNode con
+                stack.extend(node.children)
+        return nodes
+
     def analyze_property_stack(self, prim_path: str, attr_name: str, model: PropertyStackModel):
         stage = self.__get_stage__()
         prim = stage.GetPrimAtPath(prim_path)
-        primName = prim.GetName()
-
+        
         if not prim or not prim.IsValid():
             model.set_data([])
             return
@@ -163,47 +180,80 @@ class CompositionWindow(BaseWindow):
             model.set_data([])
             return
 
-        root_layer = stage.GetRootLayer()
-        sublayers = self.collect_all_sublayers(root_layer)  # dict: id -> layer
-
+        # 1. Lấy Prim Index và danh sách tất cả các Node
+        prim_index = prim.GetPrimIndex()
+        all_nodes = self._gather_nodes(prim_index)
+        
         items = []
         prop_stack = attr.GetPropertyStack()
 
         for i, spec in enumerate(prop_stack):
             layer = spec.layer
             layer_id = layer.identifier if layer else "N/A"
+            
+            # --- LOGIC MỚI: TÌM NODE CHỨA LAYER ---
+            prefix = "[UNKNOWN]"
+            found_arc = False
+            
+            # Duyệt qua các node đã thu thập để tìm xem Layer này thuộc về Node nào
+            for node in all_nodes:
+                # node.layerStack.layers chứa danh sách các layer (Root + Sublayers của node đó)
+                if layer in node.layerStack.layers:
+                    arc_type = node.arcType
+                    
+                    # --- PHÂN LOẠI PREFIX ---
+                    
+                    # 1. ROOT NODE (Local)
+                    if arc_type == Pcp.ArcTypeRoot:
+                        if layer == stage.GetRootLayer():
+                            prefix = "[ROOT]"
+                        elif layer == stage.GetSessionLayer():
+                            prefix = "[SESSION]"
+                        else:
+                            # Nếu thuộc Root Node nhưng không phải Root Layer -> Là Sublayer của Root
+                            prefix = "[SUBLAYER]"
+
+                    # 2. REFERENCE
+                    elif arc_type == Pcp.ArcTypeReference:
+                        prefix = "[REFERENCE]"
+                        # Tùy chọn: Nếu bạn muốn biết nó là sublayer bên trong reference:
+                        # if layer != node.layerStack.layers[0]: prefix += " [SUB]"
+
+                    # 3. PAYLOAD
+                    elif arc_type == Pcp.ArcTypePayload:
+                        prefix = "[PAYLOAD]"
+
+                    # 4. INHERIT (Class)
+                    elif arc_type == Pcp.ArcTypeInherit:
+                        prefix = "[INHERIT]"
+
+                    # 5. VARIANT
+                    elif arc_type == Pcp.ArcTypeVariant:
+                        # Lấy thông tin Variant cụ thể từ path của node
+                        # Path thường có dạng: ...{variantSet=variantName}...
+                        path_str = node.path.pathString
+                        prefix = "[VARIANT]"
+                        # Bạn có thể dùng hàm regex cũ của bạn để parse path_str nếu muốn hiện tên variant
+                        # v_set, v_name = self._extract_variant_info(path_str)
+                        # if v_set: prefix = f"[VARIANT] {v_set}={v_name}"
+
+                    # 6. SPECIALIZE
+                    elif arc_type == Pcp.ArcTypeSpecialize:
+                        prefix = "[SPECIALIZE]"
+
+                    found_arc = True
+                    break
+            
+            # Fallback nếu không tìm thấy trong Graph (hiếm gặp, có thể là dynamic generated)
+            if not found_arc:
+                prefix = "[OTHER]"
+            
+            # -----------------------------
+
+            # Làm đẹp tên layer (bỏ file:/, đổi slash)
             formatted_layer_id = layer_id.replace("file:/", "").replace("/", "\\")
-            path_str = spec.path.pathString
-            class_name = self.extract_class_name_from_spec(spec)
-
-            prefix = ""
-
-            # ---- VARIANT ----
-            variant_set, variant_name = self._extract_variant_info(path_str)
-            if variant_set:
-                prefix = f"[VARIANT] {variant_set}={variant_name}"
-
-            # ---- INHERIT (CLASS) ----
-            elif class_name != primName:
-                prefix = f"[INHERIT] - {class_name}"
-
-            # ---- ROOT ----
-            elif layer == root_layer:
-                prefix = "[ROOT]"
-
-            # ---- SUBLAYER ----
-            elif formatted_layer_id in sublayers:
-                prefix = "[SUBLAYER]"
-
-            # ---- PAYLOAD / REFERENCE (heuristic) ----
-            else:
-                if prim.HasPayload():
-                    prefix = "[PAYLOAD]"
-                else:
-                    prefix = "[REFERENCE]"
-
-            display_name = f"{prefix} {layer_id}"
-
+            display_name = f"{prefix} {formatted_layer_id}"
+            
             value = spec.default if spec.HasDefaultValue() else None
 
             items.append(
