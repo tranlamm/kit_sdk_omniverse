@@ -170,6 +170,7 @@ class CompositionWindow(BaseWindow):
     def analyze_property_stack(self, prim_path: str, attr_name: str, model: PropertyStackModel):
         stage = self.__get_stage__()
         prim = stage.GetPrimAtPath(prim_path)
+        primName = prim.GetName()
         
         if not prim or not prim.IsValid():
             model.set_data([])
@@ -190,6 +191,7 @@ class CompositionWindow(BaseWindow):
         for i, spec in enumerate(prop_stack):
             layer = spec.layer
             layer_id = layer.identifier if layer else "N/A"
+            class_name = self.extract_class_name_from_spec(spec)
             
             # --- LOGIC MỚI: TÌM NODE CHỨA LAYER ---
             prefix = "[UNKNOWN]"
@@ -204,7 +206,7 @@ class CompositionWindow(BaseWindow):
                     # --- PHÂN LOẠI PREFIX ---
                     
                     # 1. ROOT NODE (Local)
-                    if arc_type == Pcp.ArcTypeRoot:
+                    if arc_type == Pcp.ArcTypeRoot and class_name == primName:
                         if layer == stage.GetRootLayer():
                             prefix = "[ROOT]"
                         elif layer == stage.GetSessionLayer():
@@ -224,8 +226,8 @@ class CompositionWindow(BaseWindow):
                         prefix = "[PAYLOAD]"
 
                     # 4. INHERIT (Class)
-                    elif arc_type == Pcp.ArcTypeInherit:
-                        prefix = "[INHERIT]"
+                    elif arc_type == Pcp.ArcTypeInherit or class_name != primName:
+                        prefix = f"[INHERIT] - {class_name}"
 
                     # 5. VARIANT
                     elif arc_type == Pcp.ArcTypeVariant:
