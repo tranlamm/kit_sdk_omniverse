@@ -6,67 +6,13 @@ from .BaseWindow import BaseWindow
 from .PrimPropertyWindow import PrimPropertyWindow
 from .DependencyGraphWindow import DependencyGraphWindow
 import carb.events
-from ..utils.FilterUtils import _match_filter
+from ..utils.FilterUtils import _match_filter, find_all_multi_source_attributes
+from ..utils.SplitterUtils import split_prims_to_files
 import carb.input
 import json
 import os
 from carb.input import KeyboardEventType
 
-def find_all_multi_source_attributes(
-    min_sources: int = 2,
-    stop_after_first: bool = False,
-):
-    """
-    Duyệt toàn bộ stage và tìm các prim.attribute
-    có Property Stack >= min_sources.
-
-    Args:
-        min_sources (int): số source tối thiểu (default = 2)
-        stop_after_first (bool): True → dừng sau kết quả đầu tiên
-
-    Returns:
-        list[dict]: danh sách kết quả
-    """
-    stage = omni.usd.get_context().get_stage()
-    if not stage:
-        print("[USD] No active stage")
-        return []
-
-    results = []
-
-    for prim in stage.Traverse():
-        if not prim.IsValid():
-            continue
-
-        for attr in prim.GetAttributes():
-            if not attr.IsValid():
-                continue
-
-            try:
-                prop_stack = attr.GetPropertyStack()
-            except Exception:
-                continue
-
-            if not prop_stack or len(prop_stack) < min_sources:
-                continue
-
-            print(prop_stack)
-            entry = {
-                "prim_path": str(prim.GetPath()),
-                "attr_name": attr.GetName(),
-                "source_count": len(prop_stack),
-                "layers": [
-                    spec.layer.identifier if spec.layer else "N/A"
-                    for spec in prop_stack
-                ],
-            }
-
-            results.append(entry)
-
-            if stop_after_first:
-                return results
-
-    return results
 
 class StageInspectorWindow(BaseWindow):
     def __init__(self, title="StageInspectorWindow"):
@@ -124,15 +70,17 @@ class StageInspectorWindow(BaseWindow):
                     ui.Spacer()
                     
                     with ui.HStack(spacing=8):
-                        ui.Button("Select All", width=60, height=28, clicked_fn=self._select_all)
-                        ui.Button("Clear All", width=60, height=28, clicked_fn=self._clear_all)
-                        ui.Button("Export", width=70, height=28, clicked_fn=self._export_results)
+                        ui.Button("Focus All", width=60, height=28, clicked_fn=self._select_all)
+                        ui.Button("Unfocus All", width=60, height=28, clicked_fn=self._clear_all)
+                        ui.Button("Choose All", width=60, height=28, clicked_fn=self._on_choose_all)
+                        ui.Button("Export", width=60, height=28, clicked_fn=self._export_results)
 
                 # ===================== PATH (FULL WIDTH) =====================
                 with ui.HStack(spacing=10):
                     ui.Label("Path:", width=60)
                     self._input_path = ui.StringField(width=600, height=22)
                     ui.Button("View dependency graph", width=60, height=28, clicked_fn=self.view_dependency_graph)
+                    ui.Button("USD Splitter", width=60, height=28, clicked_fn=self.usd_splitter)
 
                 # ===================== ATTRIBUTE NAME + VALUE =====================
                 with ui.HStack(spacing=10):
@@ -393,6 +341,15 @@ class StageInspectorWindow(BaseWindow):
         self._selected_prim_paths.clear()
         self.__get_context__().get_selection().set_selected_prim_paths([], False)
         self._content.rebuild()
+
+    def _on_choose_all(self):
+        if not self._filtered_prim_paths:
+            print("No prims to choose")
+            return
+        self._selected_prim_paths.clear()
+        for obj in self._filtered_prim_paths:
+            self._selected_prim_paths.add(obj["path"])
+        self._content.rebuild()
          
     def _on_toggle_multiple(self, path):
         if path not in self._selected_prim_paths:
@@ -444,6 +401,9 @@ class StageInspectorWindow(BaseWindow):
     
     def view_dependency_graph(self):
         DependencyGraphWindow()
+
+    def usd_splitter(self):
+        split_prims_to_files(self.__get_stage__(), self._selected_prim_paths, "splitted-asset")
 
     # ----------------------- Event -----------------------
     def _on_stage_event(self, event: carb.events.IEvent):
