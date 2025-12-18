@@ -113,14 +113,13 @@ def export_subtree_excluding_children(
     """
     Export prim_path subtree but REMOVE any excluded child prims
     """
-    src_layer = stage.GetRootLayer()
-
+    prim = stage.GetPrimAtPath(prim_path)
     out_layer = get_layer(str(out_file))
-    new_prim_path = to_leaf_path(prim_path)
+    new_prim_path = to_leaf_path(prim.GetPrimStack()[0].path)
 
     Sdf.CopySpec(
-        src_layer,
-        prim_path,
+        prim.GetPrimStack()[0].layer,
+        prim.GetPrimStack()[0].path,
         out_layer,
         new_prim_path
     )
@@ -227,11 +226,13 @@ def split_prims_to_files(
 
         # payload at root
         else:
+            prim = stage.GetPrimAtPath(prim_path)
             replace_prim_with_payload(
-                root_layer,
-                prim_path,
+                prim.GetPrimStack()[0].layer,
+                prim.GetPrimStack()[0].path,
                 str(created_files[prim_path]),
                 None
             )
+            prim.GetPrimStack()[0].layer.Save()
 
     root_layer.Save()
