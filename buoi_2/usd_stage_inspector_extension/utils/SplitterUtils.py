@@ -18,25 +18,10 @@ def is_ancestor(parent: Sdf.Path, child: Sdf.Path) -> bool:
 def sort_by_depth(paths, reverse = False) -> List[Sdf.Path]:
     return sorted(paths, key=_depth, reverse=reverse)
 
-# def get_or_create_prim_spec(
-#     layer: Sdf.Layer,
-#     prim_path: Sdf.Path
-# ) -> Sdf.PrimSpec:
-#     if not prim_path.IsAbsolutePath():
-#         raise ValueError(f"Path must be absolute: {prim_path}")
-
-#     # Đã tồn tại
-#     prim_spec = layer.GetPrimAtPath(prim_path)
-#     if prim_spec:
-#         return prim_spec
-
-#     # Ensure ancestors trước
-#     parent = prim_path.GetParentPath()
-#     if parent != Sdf.Path.absoluteRootPath:
-#         get_or_create_prim_spec(layer, parent)
-
-#     # Tạo prim (CÁCH DUY NHẤT NÊN DÙNG)
-#     return Sdf.CreatePrimInLayer(layer, prim_path)
+def to_leaf_path(path: Sdf.Path) -> Sdf.Path:
+    return Sdf.Path.absoluteRootPath.AppendChild(
+        path.name
+    )
 
 def remove_all_prim_spec(
     layer: Sdf.Layer,
@@ -76,70 +61,48 @@ def remove_all_prim_spec(
     for child_name in list(prim_spec.nameChildren.keys()):
         del prim_spec.nameChildren[child_name]
 
-def get_or_create_layer(path: str) -> Sdf.Layer:
+def get_layer(path: str) -> Sdf.Layer:
     layer = Sdf.Layer.FindOrOpen(path)
     if layer:
-        return layer
+        raise RuntimeError(f"Existed layer path: {path}")
 
     return Sdf.Layer.CreateNew(path)
+
+def remap_relative_to_ancestor(
+    paths: list[Sdf.Path],
+    ancestor: Sdf.Path
+) -> list[Sdf.Path]:
+    """
+    /A/B/C/D/E   relative to /A/B/C  -> /C/D/E
+    """
+
+    if not ancestor.IsPrimPath():
+        raise ValueError(f"Ancestor must be prim path: {ancestor}")
+
+    result = []
+
+    root_name = ancestor.name
+    new_root = Sdf.Path.absoluteRootPath.AppendChild(root_name)
+
+    for p in paths:
+        if not p.IsPrimPath():
+            raise ValueError(f"Not a prim path: {p}")
+
+        if not p.HasPrefix(ancestor):
+            raise ValueError(f"{p} is not under {ancestor}")
+
+        # /A/B/C/D/E  -> D/E
+        rel = p.MakeRelativePath(ancestor)
+
+        # /C + D/E
+        new_path = new_root.AppendPath(rel)
+        result.append(new_path)
+
+    return result
 
 # ------------------------------------------------------------
 # Export logic
 # ------------------------------------------------------------
-
-def ensure_ancestor_prims(
-    layer: Sdf.Layer,
-    prim_path: Sdf.Path
-):
-    """
-    Ensure all ancestor PrimSpecs (NOT including prim_path itself)
-    exist in the layer, from top to bottom.
-    """
-
-    parent_path = prim_path.GetParentPath()
-    if parent_path == Sdf.Path.absoluteRootPath:
-        return
-
-    current_parent_spec = None
-
-    # prefixes: /World, /World/Cube, ...
-    for prefix in parent_path.GetPrefixes():
-        name = prefix.name
-
-        existing = layer.GetPrimAtPath(prefix)
-        if existing:
-            current_parent_spec = existing
-            continue
-
-        if current_parent_spec:
-            current_parent_spec = Sdf.PrimSpec(
-                current_parent_spec,
-                name,
-                Sdf.SpecifierDef
-            )
-        else:
-            current_parent_spec = Sdf.PrimSpec(
-                layer,
-                name,
-                Sdf.SpecifierDef
-            )
-
-# def ensure_prim(layer: Sdf.Layer, prim_path: Sdf.Path) -> Sdf.PrimSpec:
-#     """
-#     Ensure prim + all ancestor prims exist in layer.
-#     """
-#     if layer.GetPrimAtPath(prim_path):
-#         return layer.GetPrimAtPath(prim_path)
-
-#     parent = prim_path.GetParentPath()
-#     if parent and parent != Sdf.Path.absoluteRootPath:
-#         ensure_prim(layer, parent)
-
-#     return Sdf.PrimSpec(
-#         layer,
-#         prim_path.name,
-#         Sdf.SpecifierDef
-#     )
 
 def export_subtree_excluding_children(
     stage: Usd.Stage,
@@ -152,29 +115,20 @@ def export_subtree_excluding_children(
     """
     src_layer = stage.GetRootLayer()
 
-    out_layer = get_or_create_layer(str(out_file))
-
-    # Copy full subtree
-    ensure_ancestor_prims(out_layer, prim_path)
+    out_layer = get_layer(str(out_file))
+    new_prim_path = to_leaf_path(prim_path)
 
     Sdf.CopySpec(
         src_layer,
         prim_path,
         out_layer,
-        prim_path
+        new_prim_path
     )
 
-    root_spec = out_layer.GetPrimAtPath(prim_path)
-    if not root_spec:
-        raise RuntimeError(f"PrimSpec not found in output: {prim_path}")
-
-    # 2️⃣ Remove excluded children SAFELY
+    # Remove excluded children SAFELY
     excluded_children = sort_by_depth(excluded_children, True)
-    for child_path in excluded_children:
-        # Safety check: Ensure this child is actually under the root prim we are editing
-        if not is_ancestor(prim_path, child_path):
-            continue
-
+    relative_path_excluded_children = remap_relative_to_ancestor(excluded_children, prim_path)
+    for child_path in relative_path_excluded_children:
         remove_all_prim_spec(out_layer, child_path)
 
     out_layer.Save()
@@ -182,12 +136,16 @@ def export_subtree_excluding_children(
 def replace_prim_with_payload(
     layer: Sdf.Layer,
     prim_path: Sdf.Path,
-    asset_path: str
+    asset_path: str,
+    parent_prim_path: Sdf.Path
 ):
-    prim_spec = layer.GetPrimAtPath(prim_path)
-    remove_all_prim_spec(layer, prim_path)
+    new_prim_path = to_leaf_path(prim_path)
+    relative_prim_path = remap_relative_to_ancestor([prim_path], parent_prim_path)[0] if parent_prim_path != None else prim_path
+
+    remove_all_prim_spec(layer, relative_prim_path)
+    prim_spec = layer.GetPrimAtPath(relative_prim_path)
     prim_spec.payloadList.Add(
-        Sdf.Payload(asset_path, prim_path)
+        Sdf.Payload(asset_path, new_prim_path)
     )
 
 # ------------------------------------------------------------
@@ -262,7 +220,8 @@ def split_prims_to_files(
             replace_prim_with_payload(
                 parent_layer,
                 prim_path,
-                str(created_files[prim_path])
+                str(created_files[prim_path]),
+                parent
             )
             parent_layer.Save()
 
@@ -271,7 +230,8 @@ def split_prims_to_files(
             replace_prim_with_payload(
                 root_layer,
                 prim_path,
-                str(created_files[prim_path])
+                str(created_files[prim_path]),
+                None
             )
 
     root_layer.Save()
